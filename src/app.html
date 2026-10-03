@@ -1,0 +1,527 @@
+<title>Skypoint</title>
+<meta name="theme-color" content="#05070d">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Marcellus&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one full-screen star map aligned with the real sky; a crosshair marks where you point; a sheet at the bottom names the constellation. Committed dark look, with a red "night vision" palette swap. */
+:root{
+  --sky:#05070d;
+  --ink:#e9e4d6;
+  --muted:#8f97a8;
+  --line:#2a3245;
+  --glass:rgba(10,14,24,.82);
+  --accent:#e8b35a;
+  --font-display:"Marcellus","Cinzel","Trajan Pro",Georgia,serif;
+  --font-body:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --font-mono:"IBM Plex Mono",ui-monospace,"SF Mono",Menlo,monospace;
+  color-scheme:dark;
+}
+:root.red{
+  --ink:#ff5a4a;
+  --muted:#a8382e;
+  --line:#3a1410;
+  --glass:rgba(16,4,3,.86);
+  --accent:#ff3b2b;
+  --sky:#080101;
+}
+html,body{height:100%;margin:0}
+body{background:var(--sky);color:var(--ink);font-family:var(--font-body);overflow:hidden;-webkit-tap-highlight-color:transparent}
+#sky{position:fixed;inset:0;width:100%;height:100%;touch-action:none;display:block}
+.topbar{position:fixed;left:0;right:0;top:0;padding:calc(env(safe-area-inset-top,0px) + 10px) 16px 0;display:flex;gap:8px;flex-wrap:wrap;align-items:center;pointer-events:none}
+.chip{pointer-events:auto;display:inline-flex;align-items:center;gap:6px;background:var(--glass);border:1px solid var(--line);color:var(--ink);font:500 12.5px/1 var(--font-body);padding:9px 12px;border-radius:999px;cursor:pointer;backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px)}
+.chip .k{color:var(--muted);text-transform:uppercase;letter-spacing:.08em;font-size:10.5px}
+.chip:focus-visible,.btn:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.chip[aria-pressed="true"]{border-color:var(--accent);color:var(--accent)}
+.spacer{flex:1}
+.sheet{position:fixed;left:0;right:0;bottom:0;padding:0 16px calc(env(safe-area-inset-bottom,0px) + 14px);pointer-events:none}
+.card{pointer-events:auto;max-width:520px;margin:0 auto;background:var(--glass);border:1px solid var(--line);border-radius:18px;padding:14px 16px 14px;backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px)}
+.eyebrow{font:500 10.5px/1.2 var(--font-body);letter-spacing:.14em;text-transform:uppercase;color:var(--muted)}
+#cname{font:400 clamp(30px,9vw,44px)/1.05 var(--font-display);margin:4px 0 2px;letter-spacing:.01em;text-wrap:balance;color:var(--ink)}
+#cmeta{font-size:13.5px;color:var(--muted);min-height:1.3em}
+#cmeta b{color:var(--ink);font-weight:500}
+.read{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-top:12px;padding-top:10px;border-top:1px solid var(--line)}
+.read div{min-width:0}
+.read .v{font:500 14px/1.3 var(--font-mono);font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.read .k{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
+.actions{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap}
+.btn{flex:1 1 auto;min-width:0;background:transparent;border:1px solid var(--line);color:var(--ink);font:500 13.5px/1 var(--font-body);padding:12px 10px;border-radius:12px;cursor:pointer}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:#120b02}
+:root.red .btn.primary{color:#000}
+.btn.small{flex:0 0 auto;padding:12px 12px}
+#note{margin-top:10px;font-size:12.5px;line-height:1.45;color:var(--muted)}
+#note:empty{display:none}
+#note.warn{color:var(--accent)}
+.daynote{color:var(--accent)}
+dialog{background:var(--glass);color:var(--ink);border:1px solid var(--line);border-radius:18px;padding:18px 16px;width:min(420px,calc(100vw - 32px));box-sizing:border-box;backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px)}
+dialog::backdrop{background:rgba(0,0,0,.55)}
+dialog h2{font:400 24px/1.1 var(--font-display);margin:0 0 4px}
+dialog p{font-size:13px;color:var(--muted);line-height:1.45;margin:0 0 12px}
+.fields{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px}
+label{display:grid;gap:4px;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+input{background:transparent;border:1px solid var(--line);color:var(--ink);border-radius:10px;padding:10px;font:500 15px var(--font-mono);width:100%;box-sizing:border-box;min-width:0}
+.row{display:flex;gap:8px;flex-wrap:wrap}
+.credit{font-size:11px;color:var(--muted);margin-top:12px;line-height:1.4}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+
+<canvas id="sky" aria-label="Star map of the sky in the direction you are pointing"></canvas>
+
+<div class="topbar">
+  <button class="chip" id="locChip" type="button"><span class="k">From</span><span id="locText">…</span></button>
+  <button class="chip" id="timeChip" type="button"><span class="k">At</span><span id="timeText">now</span></button>
+  <span class="spacer"></span>
+  <button class="chip" id="redBtn" type="button" aria-pressed="false" title="Red light keeps your eyes adjusted to the dark">Red light</button>
+</div>
+
+<div class="sheet">
+  <div class="card" role="status" aria-live="polite">
+    <div class="eyebrow" id="eyebrow">You're pointing at</div>
+    <div id="cname">…</div>
+    <div id="cmeta"></div>
+    <div class="read">
+      <div><div class="k">Facing</div><div class="v" id="rAz">–</div></div>
+      <div><div class="k">Altitude</div><div class="v" id="rAlt">–</div></div>
+      <div><div class="k">RA</div><div class="v" id="rRa">–</div></div>
+      <div><div class="k">Dec</div><div class="v" id="rDec">–</div></div>
+    </div>
+    <div class="actions">
+      <button class="btn primary" id="sensorBtn" type="button">Point my phone at the sky</button>
+    </div>
+    <div id="note">Drag the map to look around. Pinch or scroll to zoom. Tap a spot to center it.</div>
+  </div>
+</div>
+
+<dialog id="locDlg">
+  <form method="dialog" id="locForm">
+    <h2>Where are you?</h2>
+    <p>The sky depends on where you stand. Use your phone's location, or type your latitude and longitude (north and east are positive).</p>
+    <div class="fields">
+      <label for="latIn">Latitude<input id="latIn" inputmode="decimal" autocomplete="off"></label>
+      <label for="lonIn">Longitude<input id="lonIn" inputmode="decimal" autocomplete="off"></label>
+    </div>
+    <div class="row">
+      <button class="btn" id="gpsBtn" type="button">Use my location</button>
+      <button class="btn primary" id="locSave" type="submit" value="save">Save</button>
+    </div>
+    <p id="locMsg" style="margin:10px 0 0"></p>
+  </form>
+</dialog>
+
+<dialog id="timeDlg">
+  <form method="dialog">
+    <h2>When are you looking?</h2>
+    <p>Preview the sky at another time, like tonight after dark.</p>
+    <div class="row" style="margin-bottom:10px">
+      <button class="btn" type="button" data-shift="-60">−1 hour</button>
+      <button class="btn" type="button" data-shift="60">+1 hour</button>
+      <button class="btn" type="button" data-tonight="1">Tonight, 10 pm</button>
+    </div>
+    <div class="row">
+      <button class="btn" type="button" data-now="1">Back to now</button>
+      <button class="btn primary" type="submit">Done</button>
+    </div>
+    <p id="timeDlgText" style="margin:12px 0 0"></p>
+    <div class="credit">Star positions from the Hipparcos catalog, constellation lines and IAU boundaries via d3-celestial by Olaf Frohn (BSD license).</div>
+  </form>
+</dialog>
+
+<script id="skydata" type="application/json">__SKYDATA__</script>
+<script>
+(function(){
+"use strict";
+var D2R=Math.PI/180,R2D=180/Math.PI;
+var DATA=JSON.parse(document.getElementById("skydata").textContent);
+
+/* ---------- vector helpers ---------- */
+function vec(raDeg,decDeg){var a=raDeg*D2R,d=decDeg*D2R,c=Math.cos(d);return [c*Math.cos(a),c*Math.sin(a),Math.sin(d)];}
+function dot(a,b){return a[0]*b[0]+a[1]*b[1]+a[2]*b[2];}
+function cross(a,b){return [a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]];}
+function norm(a){var l=Math.hypot(a[0],a[1],a[2])||1;return [a[0]/l,a[1]/l,a[2]/l];}
+function wrap360(x){x%=360;return x<0?x+360:x;}
+
+/* ---------- catalog prep (J2000 equatorial unit vectors) ---------- */
+var CONS={};
+DATA.cons.forEach(function(c){
+  CONS[c[0]]={id:c[0],name:c[0]==="Ser"?"Serpens":c[1],label:vec(c[2],c[3]),rank:c[4],star:c[5],starMag:c[6]};
+});
+var STARS=DATA.stars.map(function(s){return {v:vec(s[0],s[1]),mag:s[2],bv:s[3],name:s[4]||""};});
+var LINES=[];
+Object.keys(DATA.lines).forEach(function(id){DATA.lines[id].forEach(function(seg){LINES.push({id:id,pts:seg.map(function(p){return vec(p[0],p[1]);})});});});
+var BOUNDS=DATA.bounds.map(function(b){
+  var pts=b[1].map(function(p){return vec(p[0],p[1]);});
+  var c=[0,0,0];pts.forEach(function(p){c[0]+=p[0];c[1]+=p[1];c[2]+=p[2];});c=norm(c);
+  var minDot=1;pts.forEach(function(p){minDot=Math.min(minDot,dot(p,c));});
+  return {id:b[0],pts:pts,c:c,minDot:minDot-0.02};
+});
+
+/* Which IAU constellation contains direction p (equatorial unit vector)?
+   Winding number of the boundary as seen from p. */
+function constellationAt(p){
+  var e1=norm(Math.abs(p[2])<0.9?cross([0,0,1],p):cross([1,0,0],p)),e2=cross(p,e1);
+  for(var i=0;i<BOUNDS.length;i++){
+    var b=BOUNDS[i];
+    if(dot(p,b.c)<b.minDot)continue;
+    var pts=b.pts,n=pts.length,sum=0,prev=null;
+    for(var k=0;k<=n;k++){
+      var v=pts[k%n],a=Math.atan2(dot(v,e2),dot(v,e1));
+      if(prev!==null){var d=a-prev;if(d>Math.PI)d-=2*Math.PI;else if(d<-Math.PI)d+=2*Math.PI;sum+=d;}
+      prev=a;
+    }
+    if(Math.abs(sum)>Math.PI)return b.id;
+  }
+  var best=null,bd=-2;BOUNDS.forEach(function(b){var d=dot(p,b.c);if(d>bd){bd=d;best=b.id;}});
+  return best;
+}
+
+/* ---------- time & coordinates ---------- */
+function julian(ms){return ms/86400000+2440587.5;}
+function lstDeg(ms,lonDeg){var d=julian(ms)-2451545;return wrap360(280.46061837+360.98564736629*d+lonDeg);}
+/* rotation matrix rows: equatorial -> local East/North/Up */
+function eqToEnu(ms,latDeg,lonDeg){
+  var L=lstDeg(ms,lonDeg)*D2R,cL=Math.cos(L),sL=Math.sin(L),f=latDeg*D2R,cf=Math.cos(f),sf=Math.sin(f);
+  return [[-sL,cL,0],[-sf*cL,-sf*sL,cf],[cf*cL,cf*sL,sf]];
+}
+function mul(M,v){return [dot(M[0],v),dot(M[1],v),dot(M[2],v)];}
+function mulT(M,v){return [M[0][0]*v[0]+M[1][0]*v[1]+M[2][0]*v[2],M[0][1]*v[0]+M[1][1]*v[1]+M[2][1]*v[2],M[0][2]*v[0]+M[1][2]*v[1]+M[2][2]*v[2]];}
+function sunEq(ms){
+  var n=julian(ms)-2451545,L=280.460+0.9856474*n,g=(357.528+0.9856003*n)*D2R,lam=(L+1.915*Math.sin(g)+0.020*Math.sin(2*g))*D2R,eps=(23.439-0.0000004*n)*D2R;
+  return norm([Math.cos(lam),Math.cos(eps)*Math.sin(lam),Math.sin(eps)*Math.sin(lam)]);
+}
+
+/* ---------- state ---------- */
+var store={get:function(k){try{return JSON.parse(localStorage.getItem("skypoint."+k));}catch(e){return null;}},set:function(k,v){try{localStorage.setItem("skypoint."+k,JSON.stringify(v));}catch(e){}}};
+var TZ_GUESS={"America/New_York":[40.71,-74.01,"New York"],"America/Detroit":[42.33,-83.05,"Detroit"],"America/Chicago":[41.88,-87.63,"Chicago"],"America/Denver":[39.74,-104.99,"Denver"],"America/Phoenix":[33.45,-112.07,"Phoenix"],"America/Los_Angeles":[34.05,-118.24,"Los Angeles"],"America/Anchorage":[61.22,-149.9,"Anchorage"],"Pacific/Honolulu":[21.31,-157.86,"Honolulu"],"America/Toronto":[43.65,-79.38,"Toronto"],"America/Vancouver":[49.28,-123.12,"Vancouver"],"America/Mexico_City":[19.43,-99.13,"Mexico City"],"America/Sao_Paulo":[-23.55,-46.63,"São Paulo"],"America/Argentina/Buenos_Aires":[-34.6,-58.38,"Buenos Aires"],"Europe/London":[51.51,-0.13,"London"],"Europe/Dublin":[53.35,-6.26,"Dublin"],"Europe/Paris":[48.86,2.35,"Paris"],"Europe/Berlin":[52.52,13.4,"Berlin"],"Europe/Madrid":[40.42,-3.7,"Madrid"],"Europe/Rome":[41.9,12.5,"Rome"],"Europe/Amsterdam":[52.37,4.9,"Amsterdam"],"Europe/Stockholm":[59.33,18.07,"Stockholm"],"Europe/Moscow":[55.76,37.62,"Moscow"],"Africa/Cairo":[30.04,31.24,"Cairo"],"Africa/Johannesburg":[-26.2,28.05,"Johannesburg"],"Africa/Lagos":[6.52,3.38,"Lagos"],"Asia/Dubai":[25.2,55.27,"Dubai"],"Asia/Kolkata":[28.61,77.21,"New Delhi"],"Asia/Shanghai":[31.23,121.47,"Shanghai"],"Asia/Tokyo":[35.68,139.69,"Tokyo"],"Asia/Seoul":[37.57,126.98,"Seoul"],"Asia/Singapore":[1.35,103.82,"Singapore"],"Australia/Sydney":[-33.87,151.21,"Sydney"],"Australia/Perth":[-31.95,115.86,"Perth"],"Pacific/Auckland":[-36.85,174.76,"Auckland"]};
+function guessLocation(){
+  var tz="";try{tz=Intl.DateTimeFormat().resolvedOptions().timeZone||"";}catch(e){}
+  var g=TZ_GUESS[tz];if(g)return {lat:g[0],lon:g[1],label:g[2]+" (guess)",guess:true};
+  var lon=Math.round(-new Date().getTimezoneOffset()/60*15);return {lat:40,lon:lon,label:"40°N "+Math.abs(lon)+"°"+(lon<0?"W":"E")+" (guess)",guess:true};
+}
+var loc=store.get("loc")||guessLocation();
+var timeOffsetMin=0;
+var view={az:loc.lat>=0?180:0,alt:40,fov:90};
+var mode="drag"; // or "sensor"
+var red=!!store.get("red");
+var sensorF=null,sensorU=null,lastSensor=0,iosCorr=null,sensorSeen=false;
+
+/* ---------- elements ---------- */
+var $=function(id){return document.getElementById(id);};
+var canvas=$("sky"),ctx=canvas.getContext("2d");
+var W=0,H=0,DPR=1,CX=0,CY=0,VH=0;
+function resize(){DPR=Math.min(window.devicePixelRatio||1,2);W=canvas.clientWidth;H=canvas.clientHeight;canvas.width=Math.round(W*DPR);canvas.height=Math.round(H*DPR);layout();draw();}
+function layout(){var t=document.querySelector('.topbar').getBoundingClientRect().bottom,c=document.querySelector('.card').getBoundingClientRect().top;if(!(c>t+120)){t=0;c=H;}CX=W/2;CY=(t+c)/2;VH=c-t;}
+window.addEventListener("resize",resize);
+
+function setRed(on){red=on;document.documentElement.classList.toggle("red",on);$("redBtn").setAttribute("aria-pressed",on?"true":"false");store.set("red",on);draw();}
+$("redBtn").addEventListener("click",function(){setRed(!red);});
+
+function fmtLoc(){return loc.label||(Math.abs(loc.lat).toFixed(1)+"°"+(loc.lat<0?"S":"N")+" "+Math.abs(loc.lon).toFixed(1)+"°"+(loc.lon<0?"W":"E"));}
+function nowMs(){return Date.now()+timeOffsetMin*60000;}
+function fmtTime(){
+  if(timeOffsetMin===0)return "now";
+  var d=new Date(nowMs());return d.toLocaleString([], {weekday:"short",hour:"numeric",minute:"2-digit"});
+}
+function refreshChips(){$("locText").textContent=fmtLoc();$("timeText").textContent=fmtTime();$("timeDlgText").textContent="Showing: "+new Date(nowMs()).toLocaleString([], {weekday:"long",month:"short",day:"numeric",hour:"numeric",minute:"2-digit"});}
+
+/* ---------- camera basis in East/North/Up ---------- */
+function dragBasis(){
+  var a=view.az*D2R,h=Math.max(-89.5,Math.min(89.5,view.alt))*D2R;
+  var f=[Math.cos(h)*Math.sin(a),Math.cos(h)*Math.cos(a),Math.sin(h)];
+  var r=norm(cross(f,[0,0,1])),u=cross(r,f);return {f:f,r:r,u:u};
+}
+function basis(){
+  if(mode==="sensor"&&sensorF){var f=norm(sensorF),r=norm(cross(f,sensorU)),u=cross(r,f);return {f:f,r:r,u:u};}
+  return dragBasis();
+}
+function scaleK(){var minDim=Math.min(W,VH||H);return (minDim/2)/(2*Math.tan(view.fov*D2R/4));}
+function project(B,s,K){
+  var z=dot(s,B.f);if(z<-0.6)return null;
+  var k=2/(1+z);return [CX+K*k*dot(s,B.r),CY-K*k*dot(s,B.u),z];
+}
+function unproject(B,px,py,K){
+  var X=(px-CX)/K,Y=-(py-CY)/K,p2=X*X+Y*Y,z=(4-p2)/(4+p2),x=X*(1+z)/2,y=Y*(1+z)/2;
+  return norm([x*B.r[0]+y*B.u[0]+z*B.f[0],x*B.r[1]+y*B.u[1]+z*B.f[1],x*B.r[2]+y*B.u[2]+z*B.f[2]]);
+}
+function altAz(v){return {alt:Math.asin(Math.max(-1,Math.min(1,v[2])))*R2D,az:wrap360(Math.atan2(v[0],v[1])*R2D)};}
+var COMPASS=["N","NNE","NE","ENE","E","ESE","SE","SSE","S","SSW","SW","WSW","W","WNW","NW","NNW"];
+function compass(az){return COMPASS[Math.round(az/22.5)%16];}
+
+/* ---------- colors ---------- */
+function starColor(bv,a){
+  if(red)return "rgba(255,70,55,"+a+")";
+  var t=Math.max(-0.3,Math.min(1.8,bv));var r,g,b;
+  if(t<0.4){var k=(t+0.3)/0.7;r=170+85*k;g=195+50*k;b=255;}else{var k2=(t-0.4)/1.4;r=255;g=245-85*k2;b=230-150*k2;}
+  return "rgba("+(r|0)+","+(g|0)+","+(b|0)+","+a+")";
+}
+function C(){return red?{sky:"#080101",ground:"rgba(26,4,3,.86)",horizon:"#7a1d14",line:"rgba(255,60,45,.32)",lineHi:"rgba(255,80,60,.95)",bound:"rgba(255,60,45,.10)",boundHi:"rgba(255,70,50,.8)",label:"rgba(255,80,60,.55)",labelHi:"#ff5a4a",card:"#ff5a4a",cross:"#ff3b2b",sun:"#ff3b2b"}
+  :{sky:"#05070d",ground:"rgba(14,12,10,.86)",horizon:"#6b5a3e",line:"rgba(150,170,210,.30)",lineHi:"rgba(232,179,90,.95)",bound:"rgba(140,160,200,.09)",boundHi:"rgba(232,179,90,.75)",label:"rgba(190,200,220,.5)",labelHi:"#f1d39b",card:"#e9e4d6",cross:"#e8b35a",sun:"#f5c96a"};}
+
+/* ---------- drawing ---------- */
+var current=null,needsDraw=true;
+function draw(){needsDraw=true;}
+function render(){
+  if(!needsDraw||!W)return;needsDraw=false;
+  var col=C(),ms=nowMs(),M=eqToEnu(ms,loc.lat,loc.lon),B=basis(),K=scaleK();
+  ctx.setTransform(DPR,0,0,DPR,0,0);
+  ctx.fillStyle=col.sky;ctx.fillRect(0,0,W,H);
+
+  // what's in the middle
+  var centerEq=mulT(M,B.f),id=constellationAt(centerEq);current=id;
+  var sunEnu=mul(M,sunEq(ms)),sunAlt=Math.asin(sunEnu[2])*R2D;
+
+  // daylight wash
+  if(sunAlt>-12){var t=Math.min(1,(sunAlt+12)/18);ctx.fillStyle=red?"rgba(60,8,6,"+(0.5*t)+")":"rgba(40,70,120,"+(0.55*t)+")";ctx.fillRect(0,0,W,H);}
+
+  // boundaries
+  ctx.lineWidth=1;
+  BOUNDS.forEach(function(b){
+    var hi=b.id===id;ctx.strokeStyle=hi?col.boundHi:col.bound;ctx.setLineDash(hi?[5,4]:[3,5]);ctx.lineWidth=hi?1.4:1;
+    ctx.beginPath();var pen=false,pts=b.pts;
+    for(var k=0;k<=pts.length;k++){var p=project(B,mul(M,pts[k%pts.length]),K);if(!p){pen=false;continue;}if(pen)ctx.lineTo(p[0],p[1]);else ctx.moveTo(p[0],p[1]);pen=true;}
+    ctx.stroke();
+  });
+  ctx.setLineDash([]);
+
+  // stick figures
+  LINES.forEach(function(L){
+    var hi=L.id===id;ctx.strokeStyle=hi?col.lineHi:col.line;ctx.lineWidth=hi?1.8:1;
+    ctx.beginPath();var pen=false;
+    for(var k=0;k<L.pts.length;k++){var p=project(B,mul(M,L.pts[k]),K);if(!p){pen=false;continue;}if(pen)ctx.lineTo(p[0],p[1]);else ctx.moveTo(p[0],p[1]);pen=true;}
+    ctx.stroke();
+  });
+
+  // stars (brightest last so they sit on top)
+  var zoom=Math.max(0.8,Math.min(1.8,90/view.fov));
+  for(var i=STARS.length-1;i>=0;i--){
+    var s=STARS[i],p=project(B,mul(M,s.v),K);if(!p)continue;
+    if(p[0]<-10||p[1]<-10||p[0]>W+10||p[1]>H+10)continue;
+    var r=Math.max(0.6,(5.6-s.mag)*0.55)*zoom;
+    if(s.mag<1.5){ctx.fillStyle=starColor(s.bv,0.16);ctx.beginPath();ctx.arc(p[0],p[1],r*2.4,0,7);ctx.fill();}
+    ctx.fillStyle=starColor(s.bv,Math.min(1,0.45+(5.5-s.mag)*0.18));
+    ctx.beginPath();ctx.arc(p[0],p[1],r,0,7);ctx.fill();
+  }
+  // star names
+  ctx.font="500 11px "+getComputedStyle(document.documentElement).getPropertyValue("--font-body");
+  ctx.textBaseline="middle";
+  STARS.forEach(function(s){
+    if(!s.name||s.mag>(view.fov<70?2.6:1.6))return;
+    var p=project(B,mul(M,s.v),K);if(!p||p[2]<0)return;
+    ctx.fillStyle=col.label;ctx.fillText(s.name,p[0]+7,p[1]-7);
+  });
+
+  // sun
+  var sp=project(B,sunEnu,K);
+  if(sp&&sp[2]>0){ctx.fillStyle=col.sun;ctx.beginPath();ctx.arc(sp[0],sp[1],9,0,7);ctx.fill();ctx.fillStyle=col.label;ctx.fillText("Sun",sp[0]+13,sp[1]);}
+
+  // ground below the horizon
+  drawGround(B,K,col);
+
+  // constellation names
+  ctx.textAlign="center";
+  Object.keys(CONS).forEach(function(k){
+    var c=CONS[k],p=project(B,mul(M,c.label),K);if(!p||p[2]<0.2)return;
+    if(k!==id&&c.rank>2&&view.fov>100)return;
+    var hi=k===id;
+    ctx.font=(hi?"400 17px ":"400 12.5px ")+"Marcellus, Georgia, serif";
+    ctx.fillStyle=hi?col.labelHi:col.label;
+    ctx.fillText(hi?c.name:c.name.toUpperCase(),p[0],p[1]);
+  });
+  ctx.textAlign="start";
+
+  // crosshair
+  var cx=CX,cy=CY;ctx.strokeStyle=col.cross;ctx.lineWidth=1.5;
+  ctx.beginPath();ctx.arc(cx,cy,16,0,7);ctx.moveTo(cx-28,cy);ctx.lineTo(cx-20,cy);ctx.moveTo(cx+20,cy);ctx.lineTo(cx+28,cy);ctx.moveTo(cx,cy-28);ctx.lineTo(cx,cy-20);ctx.moveTo(cx,cy+20);ctx.lineTo(cx,cy+28);ctx.stroke();
+
+  updateCard(id,B.f,centerEq,sunAlt);
+}
+
+function drawGround(B,K,col){
+  // horizon = great circle Up=0. Project samples, fill the side containing the nadir.
+  var pts=[];
+  for(var a=0;a<=360;a+=3){var r=a*D2R;var p=project(B,[Math.sin(r),Math.cos(r),0],K);pts.push(p);}
+  ctx.fillStyle=col.ground;
+  var nad=project(B,[0,0,-1],K);
+  // Build a circle through three well-separated projected horizon points
+  var vis=pts.filter(Boolean);
+  if(vis.length<3)return;
+  var P=vis[0],Q=vis[Math.floor(vis.length/3)],R=vis[Math.floor(2*vis.length/3)];
+  var ax=P[0],ay=P[1],bx=Q[0],by=Q[1],cx=R[0],cy=R[1],d=2*(ax*(by-cy)+bx*(cy-ay)+cx*(ay-by));
+  ctx.beginPath();
+    var ux,uy,rad;
+  if(Math.abs(d)>1e-6){
+    ux=((ax*ax+ay*ay)*(by-cy)+(bx*bx+by*by)*(cy-ay)+(cx*cx+cy*cy)*(ay-by))/d;
+    uy=((ax*ax+ay*ay)*(cx-bx)+(bx*bx+by*by)*(ax-cx)+(cx*cx+cy*cy)*(bx-ax))/d;
+    rad=Math.hypot(ax-ux,ay-uy);
+  }
+  if(rad&&rad<1e6){
+    var nadirInside=nad?Math.hypot(nad[0]-ux,nad[1]-uy)<rad:false;
+    if(nadirInside){ctx.arc(ux,uy,rad,0,7);ctx.fill();}
+    else{ctx.rect(-10,-10,W+20,H+20);ctx.moveTo(ux+rad,uy);ctx.arc(ux,uy,rad,0,7,true);ctx.fill("evenodd");}
+  }else{
+    // effectively a straight line through P and R; fill the half-plane holding the nadir direction
+    var dx=R[0]-P[0],dy=R[1]-P[1],l=Math.hypot(dx,dy)||1;dx/=l;dy/=l;
+    var nx=-dy,ny=dx; var downScreen=[dot([0,0,-1],B.r),-dot([0,0,-1],B.u)];
+    if(nx*downScreen[0]+ny*downScreen[1]<0){nx=-nx;ny=-ny;}
+    var E=4*Math.max(W,H);
+    ctx.moveTo(P[0]-dx*E,P[1]-dy*E);ctx.lineTo(P[0]+dx*E,P[1]+dy*E);ctx.lineTo(P[0]+dx*E+nx*E,P[1]+dy*E+ny*E);ctx.lineTo(P[0]-dx*E+nx*E,P[1]-dy*E+ny*E);ctx.closePath();ctx.fill();
+  }
+  // horizon line and compass points
+  ctx.strokeStyle=col.horizon;ctx.lineWidth=1.5;ctx.beginPath();var pen=false;
+  pts.forEach(function(p){if(!p){pen=false;return;}if(pen)ctx.lineTo(p[0],p[1]);else ctx.moveTo(p[0],p[1]);pen=true;});ctx.stroke();
+  ctx.textAlign="center";ctx.font="600 12px "+"IBM Plex Sans, system-ui, sans-serif";
+  for(var i=0;i<8;i++){var r2=i*45*D2R,p2=project(B,[Math.sin(r2),Math.cos(r2),0],K);if(!p2||p2[2]<0)continue;ctx.fillStyle=col.horizon;ctx.fillText(COMPASS[i*2],p2[0],p2[1]+14);}
+  ctx.textAlign="start";
+}
+
+var lastCard="";
+function updateCard(id,f,eq,sunAlt){
+  var aa=altAz(f),c=CONS[id]||{name:"Unknown"};
+  var ra=wrap360(Math.atan2(eq[1],eq[0])*R2D)/15,dec=Math.asin(eq[2])*R2D;
+  var rah=Math.floor(ra),ram=Math.floor((ra-rah)*60);
+  var below=aa.alt<0,day=sunAlt>-6;
+  var meta=(c.star?"Brightest star: <b>"+esc(c.star)+"</b>"+(c.starMag!=null?" (mag "+c.starMag.toFixed(1)+")":""):"");
+  if(below)meta="<span class=\"daynote\">Below your horizon right now.</span> "+meta;
+  else if(day)meta="<span class=\"daynote\">"+(sunAlt>0?"It's daytime, so these stars are hidden by sunlight.":"Twilight: only the brightest stars are out.")+"</span> "+meta;
+  var key=id+"|"+meta;
+  if(key!==lastCard){setTimeout(function(){layout();draw();},0);$("cname").textContent=c.name;$("cmeta").innerHTML=meta;$("eyebrow").textContent=mode==="sensor"?"Your phone is pointing at":"Center of the map";lastCard=key;}
+  $("rAz").textContent=Math.round(aa.az)+"° "+compass(aa.az);
+  $("rAlt").textContent=(aa.alt>=0?"+":"")+Math.round(aa.alt)+"°";
+  $("rRa").textContent=rah+"h "+(ram<10?"0":"")+ram+"m";
+  $("rDec").textContent=(dec>=0?"+":"−")+Math.abs(dec).toFixed(0)+"°";
+}
+function esc(s){return String(s).replace(/[&<>"]/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;"}[c];});}
+
+/* ---------- touch: drag, pinch, tap ---------- */
+var pointers={},dragStart=null,pinch=null,moved=false;
+canvas.addEventListener("pointerdown",function(e){
+  canvas.setPointerCapture(e.pointerId);pointers[e.pointerId]=[e.clientX,e.clientY];moved=false;
+  var ids=Object.keys(pointers);
+  if(ids.length===1)dragStart={x:e.clientX,y:e.clientY,az:view.az,alt:view.alt};
+  if(ids.length===2){var a=pointers[ids[0]],b=pointers[ids[1]];pinch={d:Math.hypot(a[0]-b[0],a[1]-b[1]),fov:view.fov};}
+});
+canvas.addEventListener("pointermove",function(e){
+  if(!pointers[e.pointerId])return;pointers[e.pointerId]=[e.clientX,e.clientY];
+  var ids=Object.keys(pointers);
+  if(ids.length===2&&pinch){var a=pointers[ids[0]],b=pointers[ids[1]],d=Math.hypot(a[0]-b[0],a[1]-b[1]);view.fov=Math.max(25,Math.min(160,pinch.fov*pinch.d/d));moved=true;draw();return;}
+  if(ids.length===1&&dragStart&&mode==="drag"){
+    var dx=e.clientX-dragStart.x,dy=e.clientY-dragStart.y;if(Math.abs(dx)+Math.abs(dy)>4)moved=true;
+    var degPx=view.fov/Math.min(W,VH||H);
+    view.alt=Math.max(-89,Math.min(89,dragStart.alt+dy*degPx));
+    view.az=wrap360(dragStart.az-dx*degPx/Math.max(0.3,Math.cos(view.alt*D2R)));draw();
+  }
+});
+function up(e){
+  var wasTap=!moved&&Object.keys(pointers).length===1;
+  delete pointers[e.pointerId];if(Object.keys(pointers).length<2)pinch=null;
+  if(!Object.keys(pointers).length)dragStart=null;
+  if(wasTap&&mode==="drag"&&e.type==="pointerup"){var v=unproject(dragBasis(),e.clientX,e.clientY,scaleK()),aa=altAz(v);animateTo(aa.az,aa.alt);}
+}
+canvas.addEventListener("pointerup",up);canvas.addEventListener("pointercancel",up);
+canvas.addEventListener("wheel",function(e){e.preventDefault();view.fov=Math.max(25,Math.min(160,view.fov*Math.exp(e.deltaY*0.0012)));draw();},{passive:false});
+var anim=null;
+function animateTo(az,alt){
+  var a0=view.az,h0=view.alt,da=((az-a0+540)%360)-180,dh=alt-h0,t0=performance.now(),dur=matchMedia("(prefers-reduced-motion: reduce)").matches?0:380;
+  anim=function(now){var t=dur?Math.min(1,(now-t0)/dur):1,e=1-Math.pow(1-t,3);view.az=wrap360(a0+da*e);view.alt=h0+dh*e;draw();if(t>=1)anim=null;};
+}
+
+/* ---------- phone sensors ---------- */
+function screenAngle(){var a=(screen.orientation&&typeof screen.orientation.angle==="number")?screen.orientation.angle:(typeof window.orientation==="number"?window.orientation:0);return a*D2R;}
+function deviceToEnu(alpha,beta,gamma,v){
+  var a=alpha*D2R,b=beta*D2R,g=gamma*D2R;
+  var x=v[0],y=v[1],z=v[2];
+  // Ry(gamma)
+  var x1=Math.cos(g)*x+Math.sin(g)*z,y1=y,z1=-Math.sin(g)*x+Math.cos(g)*z;
+  // Rx(beta)
+  var x2=x1,y2=Math.cos(b)*y1-Math.sin(b)*z1,z2=Math.sin(b)*y1+Math.cos(b)*z1;
+  // Rz(alpha)
+  return [Math.cos(a)*x2-Math.sin(a)*y2,Math.sin(a)*x2+Math.cos(a)*y2,z2];
+}
+function circMeanUpdate(prev,next,k){if(prev===null)return next;var d=((next-prev+540)%360)-180;return wrap360(prev+d*k);}
+function onOrient(e,absolute){
+  if(e.beta==null||e.alpha==null)return;
+  var alpha;
+  if(typeof e.webkitCompassHeading==="number"&&!isNaN(e.webkitCompassHeading)){
+    // iOS: alpha is relative; learn the fixed offset to true compass alpha (away from the vertical where it is unstable)
+    var target=wrap360(360-e.webkitCompassHeading)-e.alpha;
+    var bt=Math.abs(Math.abs(e.beta)-90);
+    if(iosCorr===null||bt>20)iosCorr=circMeanUpdate(iosCorr,wrap360(target),iosCorr===null?1:0.08);
+    alpha=wrap360(e.alpha+iosCorr);
+  }else if(absolute||e.absolute===true){alpha=e.alpha;}
+  else return;
+  var th=screenAngle();
+  var f=deviceToEnu(alpha,e.beta,e.gamma||0,[0,0,-1]);
+  var u=deviceToEnu(alpha,e.beta,e.gamma||0,[Math.sin(th),Math.cos(th),0]);
+  // smoothing
+  if(!sensorF){sensorF=f;sensorU=u;}else{var k=0.25;for(var i=0;i<3;i++){sensorF[i]+= (f[i]-sensorF[i])*k;sensorU[i]+=(u[i]-sensorU[i])*k;}}
+  sensorSeen=true;lastSensor=performance.now();
+  if(mode==="sensor")draw();
+}
+// iOS adds a 0.6x magnetic declination-free true north via compass; elsewhere absolute alpha is magnetic or true depending on browser.
+var onAbs=function(e){onOrient(e,true);},onRel=function(e){onOrient(e,false);};
+function startSensors(){
+  var note=$("note");
+  function listen(){
+    if("ondeviceorientationabsolute" in window)window.addEventListener("deviceorientationabsolute",onAbs);
+    window.addEventListener("deviceorientation",onRel);
+    mode="sensor";setSensorUi();draw();
+    note.className="";note.textContent="Hold your phone up toward the sky with the screen facing you. If the direction seems off, wave the phone in a figure 8 to calibrate the compass.";
+    setTimeout(function(){
+      if(!sensorSeen){stopSensors();note.className="warn";note.textContent="This browser isn't sharing your phone's compass with the page. Open the app from its own web address in Safari or Chrome to point with your phone. You can still drag the map.";}
+    },2500);
+  }
+  if(typeof DeviceOrientationEvent==="undefined"){note.className="warn";note.textContent="This device has no motion sensors. Drag the map to look around.";return;}
+  if(typeof DeviceOrientationEvent.requestPermission==="function"){
+    DeviceOrientationEvent.requestPermission().then(function(r){if(r==="granted")listen();else{note.className="warn";note.textContent="Motion access was turned down. Drag the map instead, or reload the page and allow motion access to point with your phone.";}}).catch(function(){note.className="warn";note.textContent="Motion access isn't available on this page. Drag the map to look around.";});
+  }else listen();
+  if(loc.guess)askGps(false);
+}
+function stopSensors(){
+  window.removeEventListener("deviceorientationabsolute",onAbs);window.removeEventListener("deviceorientation",onRel);
+  if(mode==="sensor"&&sensorF){var aa=altAz(norm(sensorF));view.az=aa.az;view.alt=aa.alt;}
+  mode="drag";sensorF=null;sensorU=null;iosCorr=null;sensorSeen=false;setSensorUi();draw();
+}
+function setSensorUi(){var b=$("sensorBtn");b.textContent=mode==="sensor"?"Stop and drag the map":"Point my phone at the sky";b.classList.toggle("primary",mode!=="sensor");lastCard="";}
+$("sensorBtn").addEventListener("click",function(){if(mode==="sensor"){stopSensors();$("note").className="";$("note").textContent="Drag the map to look around. Pinch or scroll to zoom. Tap a spot to center it.";}else startSensors();});
+
+/* ---------- location ---------- */
+function setLoc(lat,lon,label){loc={lat:lat,lon:lon,label:label||null,guess:false};store.set("loc",loc);refreshChips();draw();}
+function askGps(fromDialog){
+  var msg=$("locMsg");
+  if(!navigator.geolocation){if(fromDialog)msg.textContent="Location isn't available in this browser. Type your coordinates instead.";return;}
+  if(fromDialog)msg.textContent="Finding you…";
+  navigator.geolocation.getCurrentPosition(function(p){
+    var la=+p.coords.latitude.toFixed(3),lo=+p.coords.longitude.toFixed(3);setLoc(la,lo,null);
+    $("latIn").value=la;$("lonIn").value=lo;if(fromDialog)msg.textContent="Got it.";
+  },function(){if(fromDialog)msg.textContent="Couldn't get your location here. Type your coordinates (your phone's map app shows them when you drop a pin).";},{enableHighAccuracy:false,timeout:10000,maximumAge:600000});
+}
+$("locChip").addEventListener("click",function(){$("latIn").value=loc.lat;$("lonIn").value=loc.lon;$("locMsg").textContent="";$("locDlg").showModal();});
+$("gpsBtn").addEventListener("click",function(){askGps(true);});
+$("locForm").addEventListener("submit",function(e){
+  var la=parseFloat($("latIn").value),lo=parseFloat($("lonIn").value);
+  if(!(la>=-90&&la<=90)||!(lo>=-180&&lo<=180)){e.preventDefault();$("locMsg").textContent="Latitude must be between −90 and 90, longitude between −180 and 180.";return;}
+  if(la!==loc.lat||lo!==loc.lon)setLoc(la,lo,null);
+});
+
+/* ---------- time ---------- */
+$("timeChip").addEventListener("click",function(){refreshChips();$("timeDlg").showModal();});
+$("timeDlg").addEventListener("click",function(e){
+  var t=e.target.closest("button");if(!t)return;
+  if(t.dataset.shift)timeOffsetMin+=+t.dataset.shift;
+  if(t.dataset.now)timeOffsetMin=0;
+  if(t.dataset.tonight){var d=new Date();d.setHours(22,0,0,0);if(d.getTime()<Date.now()-3*3600000)d.setDate(d.getDate()+1);timeOffsetMin=Math.round((d.getTime()-Date.now())/60000);}
+  refreshChips();draw();
+});
+
+/* ---------- loop ---------- */
+var lastTick=0;
+function loop(now){
+  if(anim)anim(now);
+  if(now-lastTick>15000){lastTick=now;draw();} // sky turns slowly; refresh occasionally
+  render();requestAnimationFrame(loop);
+}
+setRed(red);refreshChips();resize();requestAnimationFrame(loop);
+if(document.fonts&&document.fonts.ready)document.fonts.ready.then(draw);
+
+// test hook
+window.__skypoint={constellationAt:constellationAt,vec:vec,eqToEnu:eqToEnu,mul:mul,lstDeg:lstDeg,deviceToEnu:deviceToEnu,altAz:altAz};
+})();
+</script>
